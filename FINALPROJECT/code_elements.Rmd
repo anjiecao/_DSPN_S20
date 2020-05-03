@@ -48,6 +48,12 @@ data <- bind_rows(young_raw, old_raw)
 data <- data %>% filter(trialType == "test")
 ```
 
+
+```{r}
+data %>% 
+  group_by(AgeGroup) %>% summarise(n = n(),  mean_LT = mean(LookingTime), sd_LT = sd(LookingTime))
+```
+
 # Fit models on the current data:
 ```{r}
 lt_current <- lmer(LookingTime ~ AgeGroup+Sex+blockType+consistency+blockType*consistency+(1|ID), data=data)
@@ -202,9 +208,9 @@ repeat_analysis <- function(num_simulations, num_subjects, num_trials,trial_sd, 
 dat <- expand.grid(num_subjects = c(16,24,32,40), num_trials = c(1,2,3,4))
 dat$id <- 1:nrow(dat)
 
-results <- dat  %>% 
+results=dat  %>% 
     nest_legacy(-id, .key = 'parameters')  %>% 
-    mutate(power = map(parameters, ~ repeat_analysis(500, .$num_subjects, .$num_trials, 0.2, betas,sds)$power))  %>% 
+    mutate(bic_diffs = map(parameters, ~ repeat_analysis(100, .$num_subjects, .$num_trials, 0.2, betas,sds)$bic_diffs))  %>% 
     unnest_legacy(parameters, power)
 
 results
@@ -224,5 +230,290 @@ ggplot(aes(x=num_subjects, y=power, color=as.factor(num_trials))) +
     scale_y_continuous('Statistical power (for Delta BIC <= -20)') +
     theme_classic()
 ```
+
+
+
+
+
+PERMUTATION TASK WITH FAKE DATA 
+FAKE DATA 
+
+
+```{r}
+betas  = c(5, -0.0729,-0.0132,-0.0082,-0.0148,0.0199)
+# I don't really know where can I find these SD? The regression model 
+sds = c(0.002,0.002,0.002,0.002,0.002,0.002)
+
+
+#This is the function for generating simulation data 
+simulate_data <- function(num_subjects, num_trials,trial_SD, model_Beta){
+  
+  intercept = model_Beta[1]
+  Age_Beta = model_Beta[2]
+  Sex_Beta = model_Beta[3]
+  blockType_Beta = model_Beta[4]
+  consistencyType_Beta = model_Beta[5]
+  interaction_Beta = model_Beta[6]
+
+  intercept_SD = model_SD[1]
+  Age_SD = model_SD[2]
+  Sex_SD = model_SD[3]
+  blockType_SD = model_SD[4]
+  consistencyType_SD = model_SD[5]
+  interaction_SD = model_SD[6]
+
+  subjects_intercepts <- rnorm(num_subjects, intercept, intercept_SD)
+  subjects_Age <- rnorm(num_subjects, Age_Beta, Age_SD)
+  subjects_Sex <- rnorm(num_subjects, Sex_Beta, Sex_SD)
+  subjects_blockType <- rnorm(num_subjects, blockType_Beta, blockType_SD)
+  subjects_consistencyType <- rnorm(num_subjects, consistencyType_Beta, consistencyType_SD)
+  subjects_interaction <- rnorm(num_subjects, interaction_Beta, interaction_SD)
+  
+  generated_data <- data.frame(gen_subject = 1:num_subjects, 
+                               gen_intercept = subjects_intercepts,
+                               gen_Age_Beta = subjects_Age,
+                               gen_Sex_Beta = subjects_Sex,
+                               gen_blockType_Beta = subjects_blockType,
+                               gen_consistencyType_Beta = subjects_consistencyType,
+                               gen_subjects_interaction = subjects_interaction)
+  generated_data %>% 
+    nest(-gen_subject, .key = parameters) %>% 
+  mutate(young_female_label_inconsistent = map(parameters, ~rnorm(num_trials, intercept+Age_Beta+consistencyType_Beta+interaction_Beta,trial_SD)),
+         young_female_label_consistent = map(parameters, ~rnorm(num_trials, intercept+Age_Beta+interaction_Beta,trial_SD)),
+         young_female_sentence_inconsistent = map(parameters, ~rnorm(num_trials, intercept+Age_Beta+blockType_Beta+consistencyType_Beta+interaction_Beta,trial_SD)),
+         young_female_sentence_consistent = map(parameters, ~rnorm(num_trials, intercept+Age_Beta+blockType_Beta+interaction_Beta,trial_SD)),
+         young_male_label_inconsistent =  map(parameters, ~rnorm(num_trials, intercept+Age_Beta+Sex_Beta+consistencyType_Beta+interaction_Beta,trial_SD)),
+         young_male_label_consistent = map(parameters, ~rnorm(num_trials, intercept+Age_Beta+Sex_Beta+interaction_Beta,trial_SD)),
+         young_male_sentence_inconsistent = map(parameters, ~rnorm(num_trials,
+                                                                 intercept+Age_Beta+Sex_Beta+blockType_Beta+consistencyType_Beta+interaction_Beta,trial_SD)),
+         young_male_sentence_consistent = map(parameters, ~rnorm(num_trials, intercept+Age_Beta+Sex_Beta+blockType_Beta+interaction_Beta,trial_SD)),
+         old_female_label_inconsistent = map(parameters, ~rnorm(num_trials, intercept+consistencyType_Beta+interaction_Beta,trial_SD)),
+         old_female_label_consistent = map(parameters, ~rnorm(num_trials, intercept+interaction_Beta,trial_SD)),
+         old_female_sentence_inconsistent = map(parameters, ~rnorm(num_trials, intercept+blockType_Beta+consistencyType_Beta+interaction_Beta,trial_SD)),
+         old_female_sentence_consistent = map(parameters, ~rnorm(num_trials, intercept+blockType_Beta+interaction_Beta,trial_SD)),
+         old_male_label_inconsistent = map(parameters, ~rnorm(num_trials, intercept+Sex_Beta+consistencyType_Beta+interaction_Beta,trial_SD)),
+         old_male_label_consistent = map(parameters, ~rnorm(num_trials, intercept+Sex_Beta+interaction_Beta,trial_SD)),
+         old_male_sentence_consistent = map(parameters, ~rnorm(num_trials,
+                                                                 intercept+Sex_Beta+blockType_Beta+consistencyType_Beta+interaction_Beta,trial_SD)),
+         old_male_sentence_inconsistent = map(parameters, ~rnorm(num_trials, intercept+Sex_Beta+blockType_Beta+interaction_Beta,trial_SD))) %>% 
+  unnest(young_female_label_consistent,
+                young_female_label_inconsistent,
+                young_female_sentence_consistent,
+                young_female_sentence_inconsistent,
+                young_male_label_consistent,
+                young_male_label_inconsistent,
+                young_male_sentence_consistent,
+                young_male_sentence_inconsistent,
+                old_female_label_consistent,
+                old_female_label_inconsistent,
+                old_female_sentence_consistent,
+                old_female_sentence_inconsistent,
+                old_male_label_consistent,
+                old_male_label_inconsistent,
+                old_male_sentence_consistent,
+                old_male_sentence_inconsistent,
+                .drop = FALSE)  %>% 
+  unnest(parameters) %>% 
+  gather(condition, lookingtime, young_female_label_inconsistent:old_male_sentence_inconsistent)-> data_generated
+
+  data_generated %>% 
+    mutate(
+      age = ifelse(grepl("young", condition), "young", "old"),
+      sex = ifelse(grepl("female",condition), "F", "M"),
+      block = ifelse(grepl("label",condition),"label","sentence"), 
+      consistency = ifelse(grepl("inconsistent",condition), "inconsistent","consistent")
+    ) -> data_generated
+  
+return(data_generated)  
+}
+```
+
+
+```{r}
+fake_data <- simulate_data(20, 4, 1.5, betas, sds)  %>% select(gen_subject, age, sex, block, consistency, lookingtime)
+
+fake_data 
+```
+
+#PERMUTATION TASK 
+
+Age + Sex + Consistency + Block + Consistency * Block
+
+```{r}
+perm_fake_data = fake_data 
+R = 1000
+perm.coefs = matrix(NA, nrow=R, ncol = 6)
+real.coef = coef(lm(lookingtime~age+sex+consistency+block+consistency*block, data=fake_data))
+real_names <- names(real.coef)
+#run 1000 permutations 
+for(i in 1:R){
+  perm_fake_data$age = fake_data$age[sample(nrow(fake_data))]
+  perm_fake_data$sex = fake_data$sex[sample(nrow(fake_data))]
+  perm_fake_data$consistency = fake_data$consistency[sample(nrow(fake_data))]
+  perm_fake_data$block = fake_data$block[sample(nrow(fake_data))]
+
+  perm.coefs[i,] = coef(lm(lookingtime~age+sex+consistency+block+consistency*block, data=perm_fake_data))
+  colnames(perm.coefs) <- real_names
+}
+perm.coefs
+```
+ 
+ 
+ hist(perm.coefs[,"age"]) 
+hist(perm.coefs[,"sex"]) 
+hist(perm.coefs[,"consistency"])
+hist(perm.coefs[,"block"]) 
+hist(perm.coefs[,"consistency*block"]) 
+
+
+```{r}
+real.coef = coef(lm(lookingtime~age+sex+consistency+block+consistency*block, data=fake_data))
+perm.coefs[,"(Intercept)"]
+
+par(mfrow = c(2, 3))
+for (i in 2:length(real.coef)){
+  real_coef_name = names(real.coef[i])
+  real_coef_value = real.coef[real_coef_name]
+  hist(perm.coefs[,real_coef_name], main= real_coef_name) 
+  abline(v = real_coef_value, col = "red")
+
+}
+
+
+
+```
+ 
+```{r}
+perm.prob.names = c()
+perm.probs = c()
+
+for (i in 2:length(real.coef)){
+  real_coef_name = names(real.coef[i])
+  perm.prob.names <- c(perm.prob.names,real_coef_name) 
+  real_coef_value = real.coef[real_coef_name]
+  perm.prob = sum(perm.coefs[,real_coef_name]<perm.real[real_coef_name])/R 
+  perm.probs <- c(perm.probs,perm.prob)
+}
+
+
+df_permutation <- data.frame(perm.prob.names,perm.probs)
+
+df_permutation <- spread(df_permutation, perm.prob.names, perm.probs) %>%  mutate(age = ageyoung, sex=sexM, block = blocksentence, consistency = consistencyinconsistent, block=blocksentence, interaction = consistencyinconsistent:blocksentence) %>% gather(name, permutation_probability, age:interaction )
+df_permutation
+
+df_permutation %>% ggplot(aes(x = name, y = permutation_probability)) + geom_col() + geom_hline(yintercept=0.05, color = "red")
+
+```
+
+#BAYES FACTOR
+
+```{r}
+library(BayesFactor) 
+set.seed(2045)
+
+full_model <- lmBF(lookingtime~age+sex+consistency+block+consistency*block, data = fake_data) 
+model_nointeraction <- lmBF(lookingtime~age+sex+consistency+block, data = fake_data) 
+model_blockonly <- lmBF(lookingtime~age+sex+block, data = fake_data) 
+model_consistencyonly <- lmBF(lookingtime~age+sex+consistency, data = fake_data) 
+model_ageonly <- lmBF(lookingtime~age,data = fake_data)
+model_sexonly <- lmBF(lookingtime~sex,data = fake_data)
+
+allBFs <- c(full_model, model_nointeraction, model_blockonly, model_consistencyonly,model_ageonly,model_sexonly)
+allBFs
+plot(allBFs)
+```
+
+# Look at the relationship between CDI and differneces 
+
+LookingTimeDifference ~ Sex + CDI_Score + Sex*CDI_Score + (1 | Participant_ID)
+	- LookingTimeDifference: looking time in inconsistency trials - looking time in consistency trials 
+	- Sex: categorical variable, F/M
+	- CDI_Score: continuous variable, scored by CDI form 
+	- Sex*CDI_Score: these two may interact, girls might do better than boys
+	
+	    return (coef(glm(Gender~Flanker_Unadj,data=dataset,subset = index, family=binomial(link='logit'))))
+
+
+## original data
+```{r}
+library(lme4)
+
+
+
+data %>% spread(consistency, LookingTime) %>% mutate(diff = inconsistent - consistent) -> data_CDI
+data_CDI %>% select(CDI.SCORE) %>% summarise(mean = mean(CDI.SCORE), sd = sd(CDI.SCORE))
+diff_lm <- lmer(diff ~ Sex+CDI.SCORE+Sex*CDI.SCORE+(1|ID), data = data_CDI)
+diff_lm
+```
+
+
+```{r}
+ round(rnorm(10, 5, 1), 0)
+```
+
+ lmer(diff ~ Sex+CDI.SCORE+Sex*CDI.SCORE+(1|ID), data = data_CDI)
+
+
+```{r}
+simulate_CDI_data <- function(num_subjects, num_trials, diff_SD, model_Beta, model_SD){
+  
+  intercept = model_Beta[1]
+  Sex_Beta = model_Beta[2]
+  CDI_Beta = model_Beta[3]
+  interaction_Beta = model_Beta[4]
+
+  intercept_SD = model_SD[1]
+  Sex_SD = model_SD[2]
+  CDI_SD = model_SD[3]
+  interaction_SD = model_SD[4]
+  
+  subjects_intercepts <- rnorm(num_subjects, intercept, intercept_SD)
+  subjects_Sex <- rnorm(num_subjects, Sex_Beta, Sex_SD)
+  subjects_CDI <- round(rnorm(num_subjects, CDI_Beta, CDI_SD),0)
+  subjects_interaction <- rnorm(num_subjects, interaction_Beta, interaction_SD)
+
+  generated_data <- data.frame(gen_subject = 1:num_subjects, 
+                               gen_intercept = subjects_intercepts,
+                               gen_Sex_Beta = subjects_Sex,
+                               gen_CDI_Beta = subjects_CDI,
+                               gen_subjects_interaction = subjects_interaction)
+  
+  generated_data %>% 
+    nest(-gen_subject, .key = parameters) %>% 
+  mutate(female = map(parameters, ~rnorm(num_trials, intercept+CDI_Beta+interaction_Beta,diff_SD)),
+         male = map(parameters, ~rnorm(num_trials, intercept+Sex_Beta+CDI_Beta+interaction_Beta,diff_SD)))%>% 
+  unnest_legacy(female, 
+                male,
+                .drop = FALSE)  %>% 
+  unnest_legacy(parameters) %>% 
+  gather(condition, diff_lookingtime, female:male)-> data_generated
+
+  
+  
+return(data_generated)  
+}
+
+betas  = c(5, -0.0729,-0.0132,-0.0082,-0.0148)
+# I don't really know where can I find these SD? The regression model 
+sds = c(0.002,0.002,0.002,0.002,0.002)
+
+try <- simulate_CDI_data(40,4,0.02,betas, sds)
+try
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
  
  
